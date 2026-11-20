@@ -1,0 +1,11 @@
+.DS_Store
+
+# Built APKs and the slide deck are not part of the source.
+/dist/
+/slides/
+
+# Local tool settings.
+.claude/
+
+# A QR code for the slides, not used by the code.
+/docs/qr-aiceo-me.png

@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHIPKEY // verifier</title>
+<style>
+  :root {
+    --bg: #020705;
+    --panel: rgba(3, 16, 11, 0.8);
+    --line: #11452f;
+    --green: #45ff98;
+    --mid: #25b56c;
+    --faint: #12663f;
+    --white: #dcffec;
+    --amber: #ffc44d;
+    --red: #ff4466;
+    --cyan: #56e4ff;
+    --glow: 0 0 0.5rem rgba(69, 255, 152, 0.45);
+  }
+  * { box-sizing: border-box; }
+  /* One rem tracks the viewport, so the page fills a projector and a laptop alike. */
+  html { font-size: clamp(11px, 0.94vw, 21px); }
+  body {
+    margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--green);
+    font-family: "JetBrains Mono", "SF Mono", "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  #rain { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0.3; }
+  .scan {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.26) 0 1px, transparent 1px 3px);
+  }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.7) 100%);
+  }
+  .app {
+    position: relative; z-index: 2; height: 100vh; padding: 0.8rem 1rem 1rem;
+    display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 0.75rem;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 1.4rem; padding: 0.5rem 1rem;
+    border: 1px solid var(--line); background: var(--panel); box-shadow: inset 0 0 1.6rem rgba(69, 255, 152, 0.05);
+  }
+  .brand { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.14em; color: var(--white); text-shadow: var(--glow); white-space: nowrap; }
+  .brand b { color: var(--green); }
+  .tag { font-size: 0.8rem; color: var(--mid); letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap; }
+  .mode { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.14em; padding: 0.3rem 0.9rem; border: 1px solid currentColor; white-space: nowrap; cursor: pointer; user-select: none; }
+  .mode.legacy { color: var(--amber); background: rgba(255, 196, 77, 0.08); }
+  .mode.chip { color: var(--green); background: rgba(69, 255, 152, 0.08); text-shadow: var(--glow); }
+  .modes { display: flex; align-items: center; gap: 0.6rem; }
+  .clear {
+    font: inherit; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.14em; padding: 0.42rem 0.8rem;
+    color: var(--mid); background: none; border: 1px solid var(--line); white-space: nowrap; cursor: pointer;
+  }
+  .clear:hover { color: var(--white); border-color: var(--mid); }
+  .clear.armed { color: var(--red); border-color: var(--red); background: rgba(255, 68, 102, 0.1); }
+  .keys { font-size: 0.66rem; letter-spacing: 0.12em; color: var(--faint); white-space: nowrap; margin-top: 0.2rem; }
+  .grow { flex: 1; }
+  .stat { text-align: right; line-height: 1.05; }
+  .stat .n { font-size: 1.7rem; font-weight: 700; color: var(--white); text-shadow: var(--glow); }
+  .stat .l { font-size: 0.68rem; letter-spacing: 0.18em; color: var(--mid); }
+  .stat.bad .n { color: var(--red); text-shadow: 0 0 0.6rem rgba(255, 68, 102, 0.6); }
+  .live { font-size: 0.85rem; letter-spacing: 0.16em; color: var(--mid); white-space: nowrap; }
+  .live i { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 50%; background: var(--red); margin-right: 0.45rem; vertical-align: baseline; }
+  .live.on { color: var(--green); }
+  .live.on i { background: var(--green); box-shadow: 0 0 0.6rem var(--green); animation: pulse 1.4s ease-in-out infinite; }
+  #clock { font-size: 1.15rem; color: var(--white); }
+  .snd { font-size: 0.7rem; letter-spacing: 0.14em; color: var(--amber); cursor: pointer; white-space: nowrap; user-select: none; }
+  .snd.on { color: var(--green); }
+  .out { margin: 0.2rem 0 0; }
+  .out button {
+    font: inherit; font-size: 0.6rem; letter-spacing: 0.14em; color: var(--faint); background: none;
+    border: 0; padding: 0; cursor: pointer;
+  }
+  .out button:hover, .out button:focus-visible { color: var(--green); outline: none; }
+
+  main { display: grid; grid-template-columns: 43fr 57fr; gap: 0.75rem; min-height: 0; }
+  .right { display: grid; grid-template-rows: minmax(0, 44fr) minmax(0, 56fr); gap: 0.75rem; min-height: 0; }
+  .db { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 0.75rem; min-height: 0; }
+
+  .panel {
+    position: relative; border: 1px solid var(--line); background: var(--panel); min-height: 0; min-width: 0;
+    display: flex; flex-direction: column; box-shadow: inset 0 0 2rem rgba(69, 255, 152, 0.04);
+  }
+  .panel > h2 {
+    margin: 0; padding: 0.32rem 0.8rem; font-size: 0.78rem; font-weight: 600; letter-spacing: 0.2em;
+    color: var(--mid); border-bottom: 1px solid var(--line); background: rgba(17, 69, 47, 0.28);
+    display: flex; justify-content: space-between; white-space: nowrap; overflow: hidden;
+  }
+  .panel > h2 span:last-child { color: var(--faint); letter-spacing: 0.08em; }
+  .body { flex: 1; min-height: 0; overflow: hidden; padding: 0.55rem 0.8rem; }
+
+  /* ---- live log ---- */
+  #log { display: flex; flex-direction: column; justify-content: flex-end; font-size: 0.98rem; line-height: 1.42; }
+  .ln { display: grid; grid-template-columns: 5.2em 5.4em 1.3em 1fr; column-gap: 0.25em; animation: reveal 0.32s steps(28, end); }
+  .ln .t { color: var(--faint); }
+  .ln .st { color: var(--cyan); font-weight: 600; }
+  .ln .m { color: var(--green); overflow-wrap: anywhere; }
+  .ln.ok .mk, .ln.ok .m { color: var(--green); }
+  .ln.warn .mk, .ln.warn .m { color: var(--amber); }
+  .ln.no .mk, .ln.no .m { color: var(--red); font-weight: 700; text-shadow: 0 0 0.5rem rgba(255, 68, 102, 0.55); }
+  .ln.plain .m { color: var(--mid); }
+  .ln.BOOT .st { color: var(--faint); }
+  .cursor { color: var(--green); animation: blink 1s steps(1) infinite; }
+
+  /* ---- inspector ---- */
+  #insp { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto minmax(0, 1fr); align-content: start; gap: 0.6rem 1.1rem; font-size: 0.95rem; }
+  #insp .idle { grid-column: 1 / -1; grid-row: 1 / -1; align-self: center; text-align: center; color: var(--faint); font-size: 1.05rem; letter-spacing: 0.1em; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; column-gap: 0.9em; row-gap: 0.12em; align-content: start; }
+  .kv .k { color: var(--mid); }
+  .kv .v { color: var(--white); overflow-wrap: anywhere; }
+  .verdict {
+    grid-column: 1 / -1; margin-bottom: 0.15rem; padding: 0.22rem 0.7rem; font-size: 1.25rem; font-weight: 700; letter-spacing: 0.14em;
+    border: 1px solid currentColor; display: flex; justify-content: space-between; gap: 1rem; white-space: nowrap; overflow: hidden;
+  }
+  .verdict small { font-size: 0.78rem; font-weight: 400; letter-spacing: 0.08em; opacity: 0.85; align-self: center; overflow: hidden; text-overflow: ellipsis; }
+  .verdict.ok { color: var(--green); background: rgba(69, 255, 152, 0.08); text-shadow: var(--glow); }
+  .verdict.warn { color: var(--amber); background: rgba(255, 196, 77, 0.08); }
+  .verdict.no { color: var(--red); background: rgba(255, 68, 102, 0.12); animation: glitch 0.5s steps(2) 3; }
+  pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.38; color: var(--white); }
+  pre .jk { color: var(--cyan); }
+  pre .js { color: var(--amber); }
+  pre .jn { color: var(--green); }
+  pre .tree { color: var(--mid); }
+  pre .leaf { color: var(--green); font-weight: 700; }
+  .cap { color: var(--faint); font-size: 0.72rem; letter-spacing: 0.16em; margin-bottom: 0.25rem; }
+
+  /* ---- tables ---- */
+  .q { color: var(--mid); font-size: 0.8rem; margin-bottom: 0.25rem; white-space: nowrap; }
+  .q b { color: var(--green); font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th { text-align: left; font-weight: 600; color: var(--cyan); border-bottom: 1px dashed var(--line); padding: 0.1rem 0.5rem 0.14rem 0; white-space: nowrap; }
+  td { padding: 0.12rem 0.6rem 0.12rem 0; color: var(--white); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 12em; }
+  tr.new td { animation: rowflash 1.4s ease-out; }
+  td.good { color: var(--green); }
+  td.warn { color: var(--amber); }
+  td.bad { color: var(--red); font-weight: 700; }
+  td.dim { color: var(--mid); }
+  .rows { color: var(--faint); font-size: 0.75rem; margin-top: 0.2rem; }
+
+  /* ---- attack alarm ---- */
+  #alarm {
+    position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; flex-direction: column;
+    background: rgba(60, 0, 12, 0.82); color: var(--red); text-align: center;
+  }
+  #alarm.on { display: flex; animation: alarm 0.22s steps(2) 6; }
+  #alarm .big { font-size: 5.2rem; font-weight: 800; letter-spacing: 0.12em; text-shadow: 0 0 2rem rgba(255, 68, 102, 0.9); animation: glitch 0.35s steps(2) infinite; }
+  #alarm .sub { font-size: 1.5rem; color: var(--white); margin-top: 0.6rem; letter-spacing: 0.08em; }
+  #alarm .caution {
+    font-size: 1.7rem; font-weight: 800; letter-spacing: 0.5em; color: #111; padding: 0.3rem 2.4rem; margin-bottom: 1.1rem;
+    background: repeating-linear-gradient(-45deg, var(--amber) 0 1.1rem, #111 1.1rem 2.2rem); text-shadow: 0 0 0.25rem var(--amber), 0 0 0.25rem var(--amber);
+  }
+  #alarm .caution span { background: var(--amber); padding: 0.1rem 0.9rem; }
+
+  #rewind {
+    position: fixed; inset: 0; z-index: 19; display: none; align-items: center; justify-content: center; flex-direction: column;
+    background: rgba(0, 24, 12, 0.88); color: var(--green); text-align: center;
+  }
+  #rewind.on { display: flex; }
+  #rewind .big { font-size: 7rem; font-weight: 800; letter-spacing: 0.16em; text-shadow: 0 0 2rem rgba(69, 255, 152, 0.8); }
+  #rewind .sub { font-size: 1.5rem; color: var(--white); margin-top: 0.6rem; letter-spacing: 0.08em; }
+
+  @keyframes reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  @keyframes rowflash { from { background: rgba(69, 255, 152, 0.35); } to { background: transparent; } }
+  @keyframes glitch {
+    0% { transform: translate(0, 0) skewX(0); }
+    50% { transform: translate(-0.18rem, 0.06rem) skewX(-6deg); }
+    100% { transform: translate(0.18rem, -0.06rem) skewX(5deg); }
+  }
+  @keyframes alarm { 50% { background: rgba(120, 0, 24, 0.9); } }
+  @media (prefers-reduced-motion: reduce) {
+    .ln, .verdict.no, #alarm.on, #alarm .big, tr.new td, .live.on i { animation: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="rain" aria-hidden="true"></canvas>
+<div class="app">
+  <header>
+    <div>
+      <div class="brand">CHIP<b>KEY</b> // VERIFIER</div>
+      <div class="tag">hardware trust backend · keys that never leave the chip</div>
+    </div>
+    <div>
+      <div class="modes">
+        <div class="mode chip" id="mode" title="Click to switch between the old app and the chip">● CHIP MODE</div>
+        <button type="button" class="clear" id="clear" tabindex="-1" title="Removes every device, login, payment and message. The mode stays as it is.">✕ CLEAR</button>
+      </div>
+      <div class="keys">0 WIPE · L OLD APP · C CHIP · R REWIND · T TEST ALARM</div>
+    </div>
+    <div class="grow"></div>
+    <div class="stat"><div class="n" id="s-devices">0</div><div class="l">DEVICES</div></div>
+    <div class="stat"><div class="n" id="s-balance">–</div><div class="l">HER BALANCE</div></div>
+    <div class="stat"><div class="n" id="s-paid">0</div><div class="l">PAID</div></div>
+    <div class="stat bad"><div class="n" id="s-blocked">0</div><div class="l">BLOCKED</div></div>
+    <div class="stat"><div class="n" id="s-threshold">–</div><div class="l">STEP-UP AT</div></div>
+    <div>
+      <div class="live" id="live"><i></i><span>OFFLINE</span></div>
+      <div id="clock">--:--:--</div>
+      <div class="snd" id="snd" title="Browsers only play sound after a click. Press T to test the alarm.">◌ SOUND OFF · CLICK</div>
+      <form class="out" id="out" method="post" action="/logout" hidden><button type="submit" tabindex="-1">SIGN OUT</button></form>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2><span>▚ LIVE DECISION LOG</span><span>tail -f /var/log/verifier</span></h2>
+      <div class="body" id="log"><div class="cursor" id="cursor">█</div></div>
+    </section>
+
+    <div class="right">
+      <section class="panel">
+        <h2><span>▚ EVIDENCE INSPECTOR</span><span id="insp-title">awaiting evidence</span></h2>
+        <div class="body" id="insp"><div class="idle">[ no attestation or signature seen yet ]</div></div>
+      </section>
+
+      <div class="db">
+        <section class="panel"><h2><span>▚ DEVICES</span><span>enrolled public keys</span></h2><div class="body" id="t-devices"></div></section>
+        <section class="panel"><h2><span>▚ X_TOKENS</span><span>live sessions</span></h2><div class="body" id="t-tokens"></div></section>
+        <section class="panel"><h2><span>▚ TRANSACTIONS</span><span>newest first</span></h2><div class="body" id="t-txns"></div></section>
+        <section class="panel"><h2><span>▚ SMS</span><span>sent to her number</span></h2><div class="body" id="t-sms"></div></section>
+      </div>
+    </div>
+  </main>
+</div>
+<div class="scan"></div>
+<div class="vignette"></div>
+<div id="rewind"><div class="big">REWIND</div><div class="sub">same night · same message · same thief</div></div>
+<div id="alarm" role="alert"><div class="caution"><span>⚠ CAUTION ⚠</span></div><div class="big" id="alarm-title">ATTACK BLOCKED</div><div class="sub" id="alarm-sub">signature does not match the enrolled key</div></div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  // Everything from the server is text, never markup: a payee is attacker-controlled.
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ---- live log -----------------------------------------------------------
+  var log = $('log'), cursor = $('cursor');
+  var MARK = { ok: '✔', warn: '!', no: '✘' };
+  function addLine(e) {
+    var d = document.createElement('div');
+    d.className = 'ln ' + (e.mark || 'plain') + ' ' + esc(e.stage);
+    d.innerHTML = '<span class="t">' + esc(e.time) + '</span><span class="st">' + esc(e.stage) +
+      '</span><span class="mk">' + (MARK[e.mark] || '·') + '</span><span class="m">' + esc(e.msg) + '</span>';
+    log.insertBefore(d, cursor);
+    while (log.children.length > 120) log.removeChild(log.firstChild);
+  }
+
+  // ---- inspector ----------------------------------------------------------
+  function colourJson(text) {
+    return esc(text)
+      .replace(/(&quot;[^&]*?&quot;)(\s*:)/g, '<span class="jk">$1</span>$2')
+      .replace(/(:\s*)(&quot;.*?&quot;)/g, '$1<span class="js">$2</span>')
+      .replace(/(:\s*)(-?\d[\d.]*)/g, '$1<span class="jn">$2</span>');
+  }
+  function chainTree(chain) {
+    // The server sends leaf first. Draw root first, leaf last.
+    var out = [], rev = chain.slice().reverse();
+    rev.forEach(function (c, i) {
+      var pad = new Array(i).join('   ');
+      var line = (i ? pad + '└─ ' : '') + esc(c);
+      if (i === rev.length - 1) line = '<span class="leaf">' + line + '  ◀ app key</span>';
+      else line = '<span class="tree">' + line + '</span>';
+      out.push(line);
+    });
+    return out.join('\n');
+  }
+  function inspect(det) {
+    var cls = det.ok ? 'ok' : (det.kind === 'attestation' ? 'warn' : 'no');
+    var rows = (det.rows || []).map(function (r) {
+      return '<div class="k">' + esc(r[0]) + '</div><div class="v">' + esc(r[1]) + '</div>';
+    }).join('');
+    var side = det.kind === 'attestation'
+      ? '<div><div class="cap">CERTIFICATE CHAIN</div><pre>' + chainTree(det.chain || []) + '</pre></div>'
+      : '<div><div class="cap">BYTES THE CHIP SIGNED</div><pre>' + colourJson(det.payload || '') + '</pre></div>';
+    $('insp').innerHTML = '<div class="verdict ' + cls + '"><span>' + (det.ok ? '✔ ' : (cls === 'warn' ? '! ' : '✘ ')) +
+      esc(det.verdict) + '</span><small>' + esc(det.title) + '</small></div><div class="kv">' + rows + '</div>' + side;
+    $('insp-title').textContent = det.kind;
+  }
+
+  // ---- alarm sound ---------------------------------------------------------
+  // Synthesised in the page, so it needs no audio file and no network.
+  // Browsers refuse to play anything until the page has been clicked once,
+  // so the header shows whether sound is armed.
+  var audio = null;
+  function armSound() {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      $('snd').className = 'snd on';
+      $('snd').textContent = '◉ SOUND ARMED · T TO TEST';
+    } catch (e) {
+      $('snd').textContent = 'SOUND UNAVAILABLE';
+    }
+  }
+  addEventListener('click', armSound);
+  addEventListener('keydown', armSound);
+
+  function playSiren() {
+    var t0 = audio.currentTime + 0.03;
+    var master = audio.createGain();
+    master.gain.value = 0.24;
+    master.connect(audio.destination);
+    // A two-tone caution siren: six beeps, high then low.
+    for (var i = 0; i < 6; i++) {
+      var at = t0 + i * 0.36;
+      var osc = audio.createOscillator(), gain = audio.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(i % 2 ? 620 : 880, at);
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(1, at + 0.02);
+      gain.gain.setValueAtTime(1, at + 0.26);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.33);
+      osc.connect(gain); gain.connect(master);
+      osc.start(at); osc.stop(at + 0.34);
+    }
+    // A falling low growl underneath.
+    var low = audio.createOscillator(), lowGain = audio.createGain();
+    low.type = 'sawtooth';
+    low.frequency.setValueAtTime(110, t0);
+    low.frequency.linearRampToValueAtTime(70, t0 + 2.1);
+    lowGain.gain.setValueAtTime(0.4, t0);
+    lowGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.2);
+    low.connect(lowGain); lowGain.connect(master);
+    low.start(t0); low.stop(t0 + 2.25);
+    sirens++;
+  }
+  var sirens = 0;
+  function siren() {
+    if (!audio) return; // never clicked: the alarm stays silent but still shows
+    if (audio.state === 'running') playSiren();
+    else audio.resume().then(playSiren, function () {});
+  }
+
+  var alarmTimer = null;
+  function alarm(title, reason) {
+    siren();
+    $('alarm-title').textContent = title;
+    $('alarm-sub').textContent = reason;
+    $('alarm').classList.add('on');
+    clearTimeout(alarmTimer);
+    alarmTimer = setTimeout(function () { $('alarm').classList.remove('on'); }, 2600);
+  }
+
+  // ---- tables -------------------------------------------------------------
+  var seen = {}, mode = 'chip';
+  // Stage controls: switch between the two nights, or rewind the story.
+  // A 401 means the session ended: reload, and the server shows the sign-in page.
+  function signedIn(r) {
+    if (r.status === 401) { location.reload(); throw new Error('signed out'); }
+    return r;
+  }
+  function stage(body) {
+    fetch('/v1/demo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(signedIn).then(refresh).catch(function () {});
+  }
+  $('mode').addEventListener('click', function () { stage({ mode: mode === 'legacy' ? 'chip' : 'legacy' }); });
+  // Clear wipes the backend, so it takes two clicks: the first one arms it for three seconds.
+  var clearBtn = $('clear'), clearTimer = null;
+  function disarm() { clearTimeout(clearTimer); clearBtn.classList.remove('armed'); clearBtn.textContent = '✕ CLEAR'; }
+  clearBtn.addEventListener('click', function () {
+    clearBtn.blur();
+    if (clearBtn.classList.contains('armed')) { disarm(); stage({ clear: true }); return; }
+    clearBtn.classList.add('armed');
+    clearBtn.textContent = 'CLICK AGAIN TO CLEAR';
+    clearTimer = setTimeout(disarm, 3000);
+  });
+  var rewindTimer = null;
+  function clearScreen() {
+    while (log.firstChild !== cursor) log.removeChild(log.firstChild);
+    $('insp').innerHTML = '<div class="idle">[ no attestation or signature seen yet ]</div>';
+    $('insp-title').textContent = 'awaiting evidence';
+    seen = {};
+  }
+  function table(id, sql, cols, rows, keyOf, classOf) {
+    var first = !seen[id];
+    var known = seen[id] || {};
+    var next = {};
+    var head = cols.map(function (c) { return '<th>' + esc(c[1]) + '</th>'; }).join('');
+    var body = rows.map(function (r) {
+      var k = keyOf(r); next[k] = true;
+      var tds = cols.map(function (c) {
+        var cls = classOf ? classOf(c[0], r) : '';
+        return '<td' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(r[c[0]]) + '</td>';
+      }).join('');
+      return '<tr' + (!first && !known[k] ? ' class="new"' : '') + '>' + tds + '</tr>';
+    }).join('');
+    seen[id] = next;
+    $(id).innerHTML = '<div class="q">chipkey=# <b>' + esc(sql) + '</b></div><table><tr>' + head + '</tr>' + body +
+      '</table><div class="rows">(' + rows.length + (rows.length === 1 ? ' row)' : ' rows)') + '</div>';
+  }
+  function render(s) {
+    $('out').hidden = !s.login;
+    $('s-devices').textContent = s.stats.devices;
+    $('s-balance').textContent = s.stats.balance || '–';
+    mode = s.mode;
+    $('mode').className = 'mode ' + (s.mode === 'legacy' ? 'legacy' : 'chip');
+    $('mode').textContent = s.mode === 'legacy' ? '● OTP ONLY · THE OLD APP' : '● CHIP MODE';
+    $('s-paid').textContent = s.stats.paid;
+    $('s-blocked').textContent = s.stats.blocked;
+    $('s-threshold').textContent = s.policy.threshold;
+    table('t-devices', 'select * from devices;',
+      [['name', 'phone'], ['account', 'account'], ['tier', 'tier'], ['status', 'status'], ['keyId', 'key_id']],
+      s.devices, function (r) { return r.device + r.keyId + r.status; },
+      function (c, r) {
+        if (c === 'tier') return r.tier === 'STRONGBOX' || r.tier === 'TEE' ? 'good' : 'warn';
+        if (c === 'status') return r.status === 'BOUND' ? 'good' : (r.status === 'REJECTED' ? 'bad' : 'warn');
+        return '';
+      });
+    table('t-tokens', 'select * from x_tokens where expires > now();',
+      [['token', 'x_token'], ['device', 'device'], ['issued', 'issued'], ['ttl', 'expires_in']],
+      s.tokens, function (r) { return r.token; }, function (c) { return c === 'ttl' ? 'dim' : ''; });
+    table('t-txns', 'select * from transactions order by at desc;',
+      [['txn', 'txn'], ['amount', 'amount'], ['payee', 'payee'], ['auth', 'auth'], ['status', 'status']],
+      s.txns, function (r) { return r.txn + r.status; },
+      function (c, r) {
+        if (c === 'status') return r.status === 'PAID' ? 'good' : (r.status === 'BLOCKED' ? 'bad' : 'warn');
+        if (c === 'auth') return r.auth === 'CHIP' ? 'good' : 'dim';
+        return '';
+      });
+    table('t-sms', 'select * from sms order by at desc;',
+      [['at', 'at'], ['to', 'to'], ['text', 'text'], ['status', 'status']],
+      s.sms || [], function (r) { return r.at + r.text + r.status; },
+      function (c, r) {
+        if (c !== 'status') return '';
+        return r.status === 'FORWARDED' ? 'bad' : 'good';
+      });
+  }
+  var stateTimer = null;
+  function refresh() {
+    fetch('/v1/dash/state').then(signedIn).then(function (r) { return r.json(); }).then(render).catch(function () {});
+  }
+  function refreshSoon() { clearTimeout(stateTimer); stateTimer = setTimeout(refresh, 60); }
+
+  // ---- event stream -------------------------------------------------------
+  var boot = null, lastId = 0, live = $('live'), liveFrom = Infinity;
+  function setLive(on) {
+    live.className = 'live' + (on ? ' on' : '');
+    live.lastChild.textContent = on ? 'LIVE' : 'OFFLINE';
+  }
+  var es = new EventSource('/v1/dash/events');
+  // History replays on connect. Only decisions that arrive after it may raise the alarm.
+  es.onopen = function () { setLive(true); refresh(); liveFrom = Date.now() + 1200; };
+  es.onerror = function () { setLive(false); };
+  es.onmessage = function (m) {
+    var e = JSON.parse(m.data);
+    if (boot !== null && e.boot !== boot) {
+      // The verifier restarted: start a clean screen.
+      clearScreen();
+      lastId = 0;
+    }
+    boot = e.boot;
+    if (e.id <= lastId) return;
+    lastId = e.id;
+    var isLive = Date.now() > liveFrom;
+    if (e.clear) clearScreen();
+    if (e.reset) {
+      clearScreen();
+      if (isLive) {
+        $('rewind').classList.add('on');
+        clearTimeout(rewindTimer);
+        rewindTimer = setTimeout(function () { $('rewind').classList.remove('on'); }, 1700);
+      }
+    }
+    if (e.alarm && isLive) alarm(e.alarm.title, e.alarm.sub);
+    if (e.detail) inspect(e.detail);
+    else if (!e.alarm && !e.reset && !e.clear) addLine(e);
+    refreshSoon();
+  };
+  setInterval(refresh, 2000);
+
+  // T rehearses the alarm, sound included, without an attack.
+  addEventListener('keydown', function (e) {
+    if (e.key === 't' || e.key === 'T') alarm('ATTACK BLOCKED', 'alarm test: no attack happened');
+    if (e.key === 'l' || e.key === 'L') stage({ mode: 'legacy' });
+    if (e.key === 'c' || e.key === 'C') stage({ mode: 'chip' });
+    if (e.key === 'r' || e.key === 'R') stage({ reset: true, mode: 'chip', keepKeys: true });
+    if (e.key === '0') stage({ reset: true, mode: 'legacy' });
+  });
+  window.chipkeyDebug = function () { return { armed: !!audio, state: audio ? audio.state : 'none', sirens: sirens }; };
+
+  setInterval(function () {
+    $('clock').textContent = new Date().toTimeString().slice(0, 8);
+  }, 500);
+
+  // ---- matrix rain --------------------------------------------------------
+  var cv = $('rain'), cx = cv.getContext('2d'), drops = [], size = 18;
+  var glyphs = '0123456789ABCDEFアイウエオカキクケコサシスセソタチツテトナニヌネノ∴◇▚';
+  function fit() {
+    cv.width = innerWidth; cv.height = innerHeight;
+    size = Math.max(14, Math.round(innerWidth / 110));
+    drops = [];
+    for (var i = 0; i < Math.ceil(cv.width / size); i++) drops.push(Math.random() * -60);
+  }
+  function rain() {
+    cx.fillStyle = 'rgba(2, 7, 5, 0.14)';
+    cx.fillRect(0, 0, cv.width, cv.height);
+    cx.font = size + 'px monospace';
+    for (var i = 0; i < drops.length; i++) {
+      var y = drops[i] * size;
+      cx.fillStyle = Math.random() > 0.975 ? '#dcffec' : '#2bd47c';
+      cx.fillText(glyphs.charAt(Math.floor(Math.random() * glyphs.length)), i * size, y);
+      drops[i] = y > cv.height && Math.random() > 0.975 ? 0 : drops[i] + 1;
+    }
+  }
+  addEventListener('resize', fit);
+  fit();
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(rain, 70);
+})();
+</script>
+</body>
+</html>

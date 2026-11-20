@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHIPKEY // sign in</title>
+<style>
+  :root {
+    --bg: #020705; --line: #11452f; --green: #45ff98; --mid: #25b56c; --faint: #12663f;
+    --white: #dcffec; --red: #ff4466;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+    background: var(--bg); color: var(--green);
+    font-family: "JetBrains Mono", "SF Mono", "Cascadia Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  }
+  form {
+    width: min(100%, 420px); display: flex; flex-direction: column; gap: 14px;
+    border: 1px solid var(--line); border-radius: 6px; padding: 28px;
+    background: rgba(3, 16, 11, 0.8); box-shadow: 0 0 40px rgba(69, 255, 152, 0.08);
+  }
+  .brand { font-size: 22px; font-weight: 700; letter-spacing: 0.14em; color: var(--white); }
+  .brand b { color: var(--green); }
+  .tag { font-size: 12px; letter-spacing: 0.1em; color: var(--mid); margin-bottom: 8px; }
+  label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; letter-spacing: 0.14em; color: var(--mid); }
+  input {
+    font: inherit; font-size: 16px; color: var(--white); background: #010403;
+    border: 1px solid var(--line); border-radius: 4px; padding: 11px 12px; outline: none;
+  }
+  input:focus { border-color: var(--green); box-shadow: 0 0 0 2px rgba(69, 255, 152, 0.18); }
+  button {
+    font: inherit; font-size: 15px; font-weight: 700; letter-spacing: 0.14em; cursor: pointer;
+    color: var(--bg); background: var(--green); border: 0; border-radius: 4px; padding: 12px; margin-top: 6px;
+  }
+  button:hover, button:focus-visible { background: var(--white); outline: none; }
+  .problem { margin: 0; font-size: 14px; color: var(--red); }
+  .note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--faint); }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <div>
+    <div class="brand">CHIP<b>KEY</b> // VERIFIER</div>
+    <div class="tag">dashboard and stage controls</div>
+  </div>
+  <!--problem-->
+  <label>NAME
+    <input name="username" id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+  </label>
+  <label>PASSWORD
+    <input name="password" id="password" type="password" autocomplete="current-password" required>
+  </label>
+  <button type="submit" id="signin">SIGN IN</button>
+  <p class="note">This browser stays signed in for 30 days.</p>
+</form>
+</body>
+</html>
